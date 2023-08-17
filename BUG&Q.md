@@ -141,7 +141,7 @@ turn_on_page 函数中，有一段函数的目的是修改上面三个GDT表中�
 1. 为什么GDT表中每一项(除第0项)的段基址加上0xc0000000后，在中断恢复上下文时就会失败？
 2. 为什么GDT表中的GDT_CODE和GDT_DATA的段基址可以加上0xc0000000，而GDT_B8000这个段基址则加0xc0000000后无变化？
 
-# ORG .data .text 伪指令理解
+# 2. ORG .data .text 伪指令理解
 ## 问题现象
 在 setup.asm 文件中，使用 [ORG 0x500] 目的是为了让后面的汇编代码依次排布到 0x500 为起始地址的内存处。在 setup.asm 文件的起始外就定义了 GDT 表，但问题是 GDT 表的起始地址并不是 0x500，实际测试 GDT 表的起始地址是 0x67C。
 
@@ -219,3 +219,19 @@ CHECK_BUFFER_OFFER dw 0
 但是如果不使用[SECTION .data]的话，那GDT表中的数据也会被CPU当成指令处理，导致程序运行出错，所以要跳过GDT表，这样的话只能在 boot.asm 中的 jmp 0x500 处做个手脚，修改成 jmp 0x500+0x2a 即可。0x2a = 8*4(4个GDT表项，每项8个字节) + 2+4(GDT表结构) + 2 + 2(定义的ARDS_NR和CHECK_BUFFER_OFFER)
 
 修改之前的代码请参考 sha:22bddd2a；修改后的代码请参考 sha:13a98ac4
+
+# 3. 切换用户进程时导致系统重启
+具体问题为：切换用户进程时需要更新页表，即重新设置CR3寄存器，但是只要重新设置CR3寄存器时系统就会重启。BOCHS报错信息如下：
+
+```
+ exception(): 3rd (14) exception with no resolution, shutdown status is 00h, resetting
+```
+
+经过分析，原因是加载CR3的页目录表处于缺页状态，导致产生page fault。
+
+对应代码 sha:e7062d14
+
+![](images/Snipaste_2023-08-17_22-18-45.png)
+
+page_dir_vaddr 的首地址就是后面要设置到 CR3 寄存器中的值，此时page_dir_vaddr[0]是全0，直接设置到CR3中就会导致系统重启，所以需要加入上图红框的那一行，把page_dir_vaddr的第一项指向页表1的首地址。
+
